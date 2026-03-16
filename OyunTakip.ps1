@@ -143,6 +143,17 @@ function Show-TimerPanel {
     $p.Controls.AddRange(@($info, $btn)); $timer.Start(); $p.ShowDialog()
 }
 
+# --- BILGISAYAR ACILDIGINDA SURELERI SIFIRLA ---
+$ilkAcilis = Get-Config
+if ($ilkAcilis) {
+    $ilkAcilis.MirzaKalanSaniye = 3600
+    $ilkAcilis.YagizKalanSaniye = 3600
+    $ilkAcilis.SistemKilitli = $true
+    $ilkAcilis.AdminModu = $false
+    Save-Config $ilkAcilis
+}
+# ----------------------------------------------
+
 # --- ANA DÖNGÜ ---
 while($true) {
     $c = Get-Config
