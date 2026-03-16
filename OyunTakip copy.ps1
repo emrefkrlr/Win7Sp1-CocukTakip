@@ -26,10 +26,10 @@ function Verify-Pass ($inputStr) {
     $cfg = Get-Config
     if (!$cfg) { return "FAIL" }
     
-    # 1. Admin Girişi (AdminSifre)
+    # 1. Admin Girişi (Sana her şey serbest, kilit kalkar)
     if ($inputStr -eq $cfg.AdminSifre) { return "ADMIN" }
     
-    # 2. Çocuk Girişi (AnaSifre + Saat Kontrolü)
+    # 2. Çocuk Girişi (Saat kontrolü)
     $suan = Get-Date -Format "HH:mm"
     if ($inputStr.Contains($cfg.AnaSifre)) {
         if ($suan -lt $cfg.LastHour) { return "USER" }
@@ -47,8 +47,8 @@ function Show-LockScreen {
 
     $lbl = New-Object System.Windows.Forms.Label
     $cfg = Get-Config
-    $isim = if ($cfg.AktifCocuk) { $cfg.AktifCocuk.ToUpper() } else { "BEKLIYOR" }
-    $lbl.Text = "SISTEM KILITLI`nSIRADAKI: $isim"
+    $isim = if ($cfg.AktifCocuk) { $cfg.AktifCocuk.ToUpper() } else { "MIRZA/YAGIZ" }
+    $lbl.Text = "SURE DOLDU VEYA YATIS SAATI`nSIRADAKI: $isim"
     $lbl.ForeColor = "White"; $lbl.Font = New-Object System.Drawing.Font("Arial", 22, [System.Drawing.FontStyle]::Bold)
     $lbl.TextAlign = "MiddleCenter"; $lbl.Size = "$($scrW), 120"; $lbl.Top = ($scrH / 2) - 100
     
@@ -62,12 +62,11 @@ function Show-LockScreen {
     
     $btn.Add_Click({
         $res = Verify-Pass $txt.Text
-        $c = Get-Config
         if ($res -eq "ADMIN") {
-            $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c
+            $c = Get-Config; $c.SistemKilitli = $false; $c.LastHour = "23:59"; Save-Config $c
             $form.Close()
         } elseif ($res -eq "USER") {
-            $c.SistemKilitli = $false; $c.AdminModu = $false; Save-Config $c
+            $c = Get-Config; $c.SistemKilitli = $false; Save-Config $c
             $form.Close()
         } else {
             [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre veya Yatis Saati!")
@@ -79,39 +78,30 @@ function Show-LockScreen {
 # --- ZAMANLAYICI PANELİ ---
 function Show-TimerPanel {
     $p = New-Object System.Windows.Forms.Form
-    $p.Size = "250,130"; $p.StartPosition = "Manual"; $p.Location = "20, 20"
+    $p.Size = "220,130"; $p.StartPosition = "Manual"; $p.Location = "20, 20"
     $p.FormBorderStyle = "None"; $p.TopMost = $true; $p.BackColor = "DarkSlateGray"
 
     $info = New-Object System.Windows.Forms.Label
     $info.ForeColor = "White"; $info.Dock = "Fill"; $info.TextAlign = "MiddleCenter"; $info.Font = New-Object System.Drawing.Font("Arial", 11)
     
     $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "SISTEMI KILITLE"; $btn.Dock = "Bottom"; $btn.Height = 40; $btn.BackColor = "Orange"
+    $btn.Text = "DURDUR"; $btn.Dock = "Bottom"; $btn.Height = 40; $btn.BackColor = "Orange"
     
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 1000
 
     $btn.Add_Click({ 
-        $timer.Stop(); $c = Get-Config
-        $c.SistemKilitli = $true; $c.AdminModu = $false; Save-Config $c
-        $p.Close() 
+        $timer.Stop(); $c = Get-Config; $c.SistemKilitli = $true; Save-Config $c; $p.Close() 
     })
 
     $timer.Add_Tick({
         $c = Get-Config
         if (!$c) { return }
         
-        # EĞER ADMİN GİRDİYSE SÜREYİ DÜŞME
-        if ($c.AdminModu -eq $true) {
-            $info.Text = "ADMIN MODU`nSURE ISLEMIYOR"
-            $info.ForeColor = "Lime"
-            return
-        }
-
-        # ÇOCUK MODU İSE SÜRE DÜŞ
         $k = if($c.AktifCocuk -eq "Mirza") {"MirzaKalanSaniye"} else {"YagizKalanSaniye"}
         $c.$k -= 1
         
+        # Süre biterse veya Saat geçerse kilitle
         if ($c.$k -le 0 -or (Get-Date -Format "HH:mm") -ge $c.LastHour) {
             if ($c.$k -le 0) {
                 $c.$k = 3600
