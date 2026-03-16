@@ -3,6 +3,19 @@ Add-Type -AssemblyName System.Drawing
 
 $configPath = "C:\CocukTakip\config.json"
 
+# --- SÜRÜKLEME İÇİN GEREKLİ SİSTEM KODU ---
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+public class DragHelper {
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")]
+    public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+}
+"@
+Add-Type -TypeDefinition $code
+
 # --- GÜVENLİ DOSYA SİSTEMİ ---
 function Get-Config { 
     try {
@@ -30,7 +43,7 @@ function Show-LockScreen {
     $scrH = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
 
     $cfg = Get-Config
-    $seciliCocuk = if ($cfg.AktifCocuk) { $cfg.AktifCocuk } else { "Mirza" }
+    $script:seciliCocuk = if ($cfg.AktifCocuk) { $cfg.AktifCocuk } else { "Mirza" }
 
     $lbl = New-Object System.Windows.Forms.Label
     $lbl.Text = "KULLANICI SECIN VE SIFRE GIRIN"; $lbl.ForeColor = "White"
@@ -46,12 +59,15 @@ function Show-LockScreen {
     $btnYagiz.Left = ($scrW / 2) + 5; $btnYagiz.FlatStyle = "Flat"; $btnYagiz.ForeColor = "White"
 
     $updateButtons = {
-        if ($seciliCocuk -eq "Mirza") { $btnMirza.BackColor = "RoyalBlue"; $btnYagiz.BackColor = "DimGray" }
-        else { $btnYagiz.BackColor = "RoyalBlue"; $btnMirza.BackColor = "DimGray" }
+        if ($script:seciliCocuk -match "Mirza") { 
+            $btnMirza.BackColor = "SteelBlue"; $btnYagiz.BackColor = "DimGray" 
+        } else { 
+            $btnYagiz.BackColor = "SteelBlue"; $btnMirza.BackColor = "DimGray" 
+        }
     }
     &$updateButtons
-    $btnMirza.Add_Click({ $seciliCocuk = "Mirza"; &$updateButtons })
-    $btnYagiz.Add_Click({ $seciliCocuk = "Yağız"; &$updateButtons })
+    $btnMirza.Add_Click({ $script:seciliCocuk = "Mirza"; &$updateButtons })
+    $btnYagiz.Add_Click({ $script:seciliCocuk = "Yağız"; &$updateButtons })
 
     $txt = New-Object System.Windows.Forms.TextBox
     $txt.PasswordChar = "*"; $txt.Size = "300,40"; $txt.Font = New-Object System.Drawing.Font("Arial", 18)
@@ -67,37 +83,38 @@ function Show-LockScreen {
             $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c
             $form.Close()
         } elseif ($txt.Text.Contains($c.AnaSifre) -and (Get-Date -Format "HH:mm") -lt $c.LastHour) {
-            $c.SistemKilitli = $false; $c.AdminModu = $false; $c.AktifCocuk = $seciliCocuk; Save-Config $c
+            $c.SistemKilitli = $false; $c.AdminModu = $false; 
+            $c.AktifCocuk = $script:seciliCocuk
+            Save-Config $c
             $form.Close()
-        } else { [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre!") }
+        } else { [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre veya Yatis Saati!") }
     })
     $form.Controls.AddRange(@($lbl, $btnMirza, $btnYagiz, $txt, $btnEnter))
     $form.ShowDialog()
 }
 
-# --- ZAMANLAYICI PANELİ (KONFOR GÜNCELLEMESİ) ---
+# --- ZAMANLAYICI PANELİ ---
 function Show-TimerPanel {
     $p = New-Object System.Windows.Forms.Form
-    $p.Size = "200,100"; $p.StartPosition = "Manual"; $p.Location = "20, 20"
-    $p.FormBorderStyle = "None"; $p.TopMost = $true; $p.BackColor = "Black"
-    $p.Opacity = 0.85 # Şeffaflık eklendi
+    $p.Size = "220,110"; $p.StartPosition = "Manual"; $p.Location = "20, 20"
+    $p.FormBorderStyle = "None"; $p.TopMost = $true; 
+    $p.BackColor = "DarkSlateGray"; $p.Opacity = 0.85
 
-    # Sürükle-Bırak Mantığı
-    $mouseDown = $false; $mousePos = New-Object System.Drawing.Point
-    $p.Add_MouseDown({ $script:mouseDown = $true; $script:mousePos = [System.Windows.Forms.Cursor]::Position; $script:formPos = $p.Location })
-    $p.Add_MouseMove({
-        if ($script:mouseDown) {
-            $diff = [System.Windows.Forms.Cursor]::Position
-            $p.Location = New-Object System.Drawing.Point($script:formPos.X + $diff.X - $script:mousePos.X, $script:formPos.Y + $diff.Y - $script:mousePos.Y)
-        }
-    })
-    $p.Add_MouseUp({ $script:mouseDown = $false })
+    # Gelişmiş Sürükle-Bırak (Heryerden tutulabilir)
+    $dragHandler = {
+        [DragHelper]::ReleaseCapture()
+        [DragHelper]::SendMessage($p.Handle, 0xA1, 0x2, 0)
+    }
+    $p.Add_MouseDown($dragHandler)
 
     $info = New-Object System.Windows.Forms.Label
-    $info.ForeColor = "White"; $info.Dock = "Fill"; $info.TextAlign = "MiddleCenter"; $info.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+    $info.ForeColor = "White"; $info.Dock = "Fill"; $info.TextAlign = "MiddleCenter"
+    $info.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+    $info.Add_MouseDown($dragHandler) # Yazıya tıklayınca da sürüklensin
     
     $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "KILITLE"; $btn.Dock = "Bottom"; $btn.Height = 30; $btn.BackColor = "DarkRed"; $btn.ForeColor = "White"; $btn.FlatStyle = "Flat"
+    $btn.Text = "KILITLE"; $btn.Dock = "Bottom"; $btn.Height = 35; 
+    $btn.BackColor = "Orange"; $btn.ForeColor = "Black"; $btn.FlatStyle = "Flat"
     
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 1000
@@ -106,13 +123,16 @@ function Show-TimerPanel {
     $timer.Add_Tick({
         $c = Get-Config
         if (!$c) { return }
-        if ($c.AdminModu) { $info.Text = "ADMIN MODU"; $info.ForeColor = "Lime"; return }
+        if ($c.AdminModu) { $info.Text = "ADMIN MODU`nSURE ISLEMIYOR"; $info.ForeColor = "Lime"; return }
 
-        $k = if($c.AktifCocuk -eq "Mirza") {"MirzaKalanSaniye"} else {"YagizKalanSaniye"}
+        $k = if($c.AktifCocuk -match "Mirza") {"MirzaKalanSaniye"} else {"YagizKalanSaniye"}
         $c.$k -= 1
         
         if ($c.$k -le 0 -or (Get-Date -Format "HH:mm") -ge $c.LastHour) {
-            if ($c.$k -le 0) { $c.$k = 3600; $c.AktifCocuk = if($c.AktifCocuk -eq "Mirza") {"Yağız"} else {"Mirza"} }
+            if ($c.$k -le 0) { 
+                $c.$k = 3600; 
+                $c.AktifCocuk = if($c.AktifCocuk -match "Mirza") {"Yağız"} else {"Mirza"} 
+            }
             $timer.Stop(); $timer.Dispose(); $c.SistemKilitli = $true; Save-Config $c; $p.Close()
         }
         Save-Config $c
