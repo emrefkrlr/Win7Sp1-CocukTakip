@@ -29,70 +29,35 @@ function Show-LockScreen {
     $scrW = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
     $scrH = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
 
-    $cfg = Get-Config
-    $seciliCocuk = $cfg.AktifCocuk # Varsayılan olarak config'deki çocuk
-
-    # Başlık
     $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = "KULLANICI SECIN VE SIFRE GIRIN"
+    $cfg = Get-Config
+    $isim = if ($cfg.AktifCocuk) { $cfg.AktifCocuk.ToUpper() } else { "..." }
+    $lbl.Text = "SISTEM KILITLI`nSIRADAKI: $isim"
     $lbl.ForeColor = "White"; $lbl.Font = New-Object System.Drawing.Font("Arial", 22, [System.Drawing.FontStyle]::Bold)
-    $lbl.TextAlign = "MiddleCenter"; $lbl.Size = "$($scrW), 80"; $lbl.Top = ($scrH / 2) - 200
-    $form.Controls.Add($lbl)
-
-    # Seçim Butonları (Mirza & Yağız)
-    $btnMirza = New-Object System.Windows.Forms.Button
-    $btnMirza.Text = "MIRZA"; $btnMirza.Size = "145,50"; $btnMirza.Top = ($scrH / 2) - 100
-    $btnMirza.Left = ($scrW / 2) - 150; $btnMirza.FlatStyle = "Flat"; $btnMirza.ForeColor = "White"
+    $lbl.TextAlign = "MiddleCenter"; $lbl.Size = "$($scrW), 120"; $lbl.Top = ($scrH / 2) - 100
     
-    $btnYagiz = New-Object System.Windows.Forms.Button
-    $btnYagiz.Text = "YAGIZ"; $btnYagiz.Size = "145,50"; $btnYagiz.Top = ($scrH / 2) - 100
-    $btnYagiz.Left = ($scrW / 2) + 5; $btnYagiz.FlatStyle = "Flat"; $btnYagiz.ForeColor = "White"
-
-    # Buton Renk Güncelleme Fonksiyonu
-    $updateButtons = {
-        if ($seciliCocuk -eq "Mirza") {
-            $btnMirza.BackColor = "RoyalBlue"; $btnYagiz.BackColor = "DimGray"
-        } else {
-            $btnYagiz.BackColor = "RoyalBlue"; $btnMirza.BackColor = "DimGray"
-        }
-    }
-    &$updateButtons
-
-    $btnMirza.Add_Click({ $seciliCocuk = "Mirza"; &$updateButtons })
-    $btnYagiz.Add_Click({ $seciliCocuk = "Yağız"; &$updateButtons })
-
-    # Şifre Kutusu
     $txt = New-Object System.Windows.Forms.TextBox
     $txt.PasswordChar = "*"; $txt.Size = "300,40"; $txt.Font = New-Object System.Drawing.Font("Arial", 18)
-    $txt.Left = ($scrW / 2) - 150; $txt.Top = ($scrH / 2) + 10
+    $txt.Left = ($scrW / 2) - 150; $txt.Top = ($scrH / 2) + 20
     
-    # Giriş Butonu
-    $btnEnter = New-Object System.Windows.Forms.Button
-    $btnEnter.Text = "SISTEMI AC"; $btnEnter.Size = "300,50"; $btnEnter.BackColor = "SteelBlue"; $btnEnter.ForeColor = "White"
-    $btnEnter.Left = $txt.Left; $btnEnter.Top = $txt.Bottom + 20
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = "SISTEMI AC"; $btn.Size = "300,50"; $btn.BackColor = "SteelBlue"; $btn.ForeColor = "White"
+    $btn.Left = $txt.Left; $btn.Top = $txt.Bottom + 20
     
-    $btnEnter.Add_Click({
-        $c = Get-Config
-        $input = $txt.Text
-        
-        # 1. Admin Kontrolü (Her zaman geçerli)
-        if ($input -eq $c.AdminSifre) {
-            $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c
+    $btn.Add_Click({
+        $cfg = Get-Config
+        if ($txt.Text -eq $cfg.AdminSifre) {
+            $cfg.SistemKilitli = $false; $cfg.AdminModu = $true; Save-Config $cfg
             $form.Close()
-        } 
-        # 2. Çocuk Kontrolü
-        elseif ($input.Contains($c.AnaSifre) -and (Get-Date -Format "HH:mm") -lt $c.LastHour) {
-            $c.SistemKilitli = $false; $c.AdminModu = $false; $c.AktifCocuk = $seciliCocuk; Save-Config $c
+        } elseif ($txt.Text.Contains($cfg.AnaSifre) -and (Get-Date -Format "HH:mm") -lt $cfg.LastHour) {
+            $cfg.SistemKilitli = $false; $cfg.AdminModu = $false; Save-Config $cfg
             $form.Close()
-        } 
-        else { [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre veya Yatis Saati!") }
+        } else { [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre!") }
     })
-
-    $form.Controls.AddRange(@($btnMirza, $btnYagiz, $txt, $btnEnter))
-    $form.ShowDialog()
+    $form.Controls.AddRange(@($lbl, $txt, $btn)); $form.ShowDialog()
 }
 
-# --- ZAMANLAYICI PANELİ (Değişmedi, sadece saniye korumalı) ---
+# --- ZAMANLAYICI PANELİ ---
 function Show-TimerPanel {
     $p = New-Object System.Windows.Forms.Form
     $p.Size = "250,130"; $p.StartPosition = "Manual"; $p.Location = "20, 20"
@@ -108,7 +73,8 @@ function Show-TimerPanel {
     $timer.Interval = 1000
 
     $btn.Add_Click({ 
-        $timer.Stop(); $timer.Dispose(); $c = Get-Config
+        $timer.Stop(); $timer.Dispose() # Zamanlayiciyi tamamen yok et
+        $c = Get-Config
         $c.SistemKilitli = $true; $c.AdminModu = $false; Save-Config $c
         $p.Close() 
     })
@@ -116,14 +82,19 @@ function Show-TimerPanel {
     $timer.Add_Tick({
         $c = Get-Config
         if (!$c) { return }
-        if ($c.AdminModu) { $info.Text = "ADMIN MODU`nSURE ISLEMIYOR"; $info.ForeColor = "Lime"; return }
+        
+        if ($c.AdminModu) {
+            $info.Text = "ADMIN MODU`nSURE ISLEMIYOR"; $info.ForeColor = "Lime"
+            return
+        }
 
         $k = if($c.AktifCocuk -eq "Mirza") {"MirzaKalanSaniye"} else {"YagizKalanSaniye"}
         $c.$k -= 1
         
         if ($c.$k -le 0 -or (Get-Date -Format "HH:mm") -ge $c.LastHour) {
-            if ($c.$k -le 0) { $c.$k = 3600; $c.AktifCocuk = if($c.AktifCocuk -eq "Mirza") {"Yağız"} else {"Mirza"} }
-            $timer.Stop(); $timer.Dispose(); $c.SistemKilitli = $true; Save-Config $c; $p.Close()
+            if ($c.$k -le 0) { $c.$k = 3600; $c.AktifCocuk = if($c.AktifCocuk -eq "Mirza") {"Yagiz"} else {"Mirza"} }
+            $timer.Stop(); $timer.Dispose()
+            $c.SistemKilitli = $true; Save-Config $c; $p.Close()
         }
         Save-Config $c
         $ts = [TimeSpan]::FromSeconds($c.$k)
