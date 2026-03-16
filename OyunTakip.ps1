@@ -9,7 +9,10 @@ function Get-Config {
         if (Test-Path $configPath) {
             $content = Get-Content $configPath -Raw -ErrorAction SilentlyContinue
             if ([string]::IsNullOrWhiteSpace($content)) { return $null }
-            return $content | ConvertFrom-Json 
+            $cfg = $content | ConvertFrom-Json
+            # Eksik özellik varsa hata vermemesi için ekliyoruz
+            if ($null -eq $cfg.AdminModu) { Add-Member -InputObject $cfg -MemberType NoteProperty -Name "AdminModu" -Value $false -Force }
+            return $cfg
         }
     } catch { return $null }
 }
@@ -25,11 +28,7 @@ function Save-Config ($obj) {
 function Verify-Pass ($inputStr) {
     $cfg = Get-Config
     if (!$cfg) { return "FAIL" }
-    
-    # 1. Admin Girişi (AdminSifre)
     if ($inputStr -eq $cfg.AdminSifre) { return "ADMIN" }
-    
-    # 2. Çocuk Girişi (AnaSifre + Saat Kontrolü)
     $suan = Get-Date -Format "HH:mm"
     if ($inputStr.Contains($cfg.AnaSifre)) {
         if ($suan -lt $cfg.LastHour) { return "USER" }
@@ -47,7 +46,7 @@ function Show-LockScreen {
 
     $lbl = New-Object System.Windows.Forms.Label
     $cfg = Get-Config
-    $isim = if ($cfg.AktifCocuk) { $cfg.AktifCocuk.ToUpper() } else { "BEKLIYOR" }
+    $isim = if ($cfg.AktifCocuk) { $cfg.AktifCocuk.ToUpper() } else { "MIRZA" }
     $lbl.Text = "SISTEM KILITLI`nSIRADAKI: $isim"
     $lbl.ForeColor = "White"; $lbl.Font = New-Object System.Drawing.Font("Arial", 22, [System.Drawing.FontStyle]::Bold)
     $lbl.TextAlign = "MiddleCenter"; $lbl.Size = "$($scrW), 120"; $lbl.Top = ($scrH / 2) - 100
@@ -69,9 +68,7 @@ function Show-LockScreen {
         } elseif ($res -eq "USER") {
             $c.SistemKilitli = $false; $c.AdminModu = $false; Save-Config $c
             $form.Close()
-        } else {
-            [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre veya Yatis Saati!")
-        }
+        } else { [System.Windows.Forms.MessageBox]::Show("Gecersiz Sifre!") }
     })
     $form.Controls.AddRange(@($lbl, $txt, $btn)); $form.ShowDialog()
 }
@@ -101,7 +98,7 @@ function Show-TimerPanel {
         $c = Get-Config
         if (!$c) { return }
         
-        # EĞER ADMİN GİRDİYSE SÜREYİ DÜŞME
+        # ADMIN GIRDIYSE SÜRE DÜŞME
         if ($c.AdminModu -eq $true) {
             $info.Text = "ADMIN MODU`nSURE ISLEMIYOR"
             $info.ForeColor = "Lime"
