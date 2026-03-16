@@ -20,56 +20,68 @@ Sistemin çalışması için tüm dosyaların `C:\CocukTakip\` klasörü altınd
 ### 1. Dosyaları Hazırlayın
 Projeyi `C:\CocukTakip\` klasörüne indirin. `config.json` dosyasındaki şifreleri ve saatleri kendinize göre güncelleyin.
 
-### 2. PowerShell İzinlerini Açın
-Windows PowerShell'i yönetici olarak çalıştırın ve şu komutu girin:
-```powershell
+### Adım 2: PowerShell Yetkilerini Tanımlayın
+Windows 7 güvenlik nedeniyle dışarıdan gelen scriptlerin çalışmasını engeller. Bunu aşmak için:
+
+1. Başlat menüsüne "PowerShell" yaz.
+
+2. Mavi logoya sağ tıkla ve "Yönetici Olarak Çalıştır" de.
+
+3. Açılan ekrana şu komutu yapıştır ve Enter'a bas:
+
+```PowerShell
 Set-ExecutionPolicy RemoteSigned -Force
 ```
+4. Gelen soruya "Y" (Evet) diyerek onayla.
 
-### 3. Otomatik Başlatma (Görev Zamanlayıcı)
+### Adım 3: Görev Zamanlayıcı ile "Kapatılamaz" Yapın
 
-Sistemin her açılışta çalışması ve kapatılamaz olması için:
+Çocukların bu programı kapatamaması için onu bir Windows servisi gibi arka planda başlatmalıyız:
 
-- taskschd.msc (Görev Zamanlayıcı) uygulamasını açın.
+1. Başlat menüsüne taskschd.msc yaz ve aç.
 
-- Yeni Görev Oluştur'a tıklayın.
+2. Sağ taraftaki panelden "Görev Oluştur..." (Create Task) seçeneğine tıkla.
 
-- Genel: Adını CocukTakip koyun. "En yüksek ayrıcalıklarla çalıştır" seçeneğini işaretleyin.
+3. Genel Sekmesi:
 
-- Tetikleyiciler: "Oturum açıldığında" olarak ayarlayın.
+    - İsim: CocukTakip
 
-- Eylemler: "Program Başlat"ı seçin.
+    - En alttaki "En yüksek ayrıcalıklarla çalıştır" kutucuğunu işaretle. (Bu, şifre ekranının oyunların üstüne çıkmasını sağlar).
 
--- Program/Script: powershell.exe
+4. Tetikleyiciler (Triggers) Sekmesi:
 
--- Bağımsız Değişkenler: -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\CocukTakip\OyunTakip.ps1"
+    - "Yeni..." butonuna tıkla.
 
-- Ayarlar: "Görevin zaten çalışıyor olması durumunda: Yeni bir örneği başlatma" seçeneğini seçin.
+    - En üstteki listeden "Oturum açıldığında" (At log on) seçeneğini seç ve Tamam de.
 
-## 🛠️ Yapılandırma (config.json)
+5. Eylemler (Actions) Sekmesi:
 
-```JSON
-{
-    "AnaSifre": "x9395",          // Çocukların şifresindeki gizli anahtar
-    "AdminSifre": "Admin123!",   // Sizin tam yetki şifreniz
-    "LastHour": "21:00",         // Bilgisayarın kapanacağı saat
-    "AktifCocuk": "Mirza",       // Sıradaki çocuk
-    "MirzaKalanSaniye": 3600,    // Kalan süreler
-    "YagizKalanSaniye": 3600,
-    "SistemKilitli": true        // Başlangıç durumu
-}
-````
+    - "Yeni..." butonuna tıkla.
 
----
+    - Program/Script kısmına: powershell.exe yaz.
 
-### 🚀 GitHub'a Gönderme Adımları (VS Code Üzerinden)
+    - Bağımsız değişkenler ekle kısmına tam olarak şunu yapıştır:
+    ```PowerShell
+    -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\CocukTakip\OyunTakip.ps1"
+    ```
+6. Ayarlar (Settings) Sekmesi:
 
-Eğer VS Code'da terminal üzerinden bu dosyaları repoya göndermek istersen şu komutları sırasıyla uygulayabilirsin:
+    - "Görevin zaten çalışıyor olması durumunda..." seçeneğinin "Yeni bir örneği başlatma" olduğundan emin ol.
 
-1.  **Değişiklikleri ekle:** `git add .`
-2.  **Commit oluştur:** `git commit -m "İlk kurulum dosyaları ve README eklendi"`
-3.  **Gönder:** `git push origin main` (Veya ana dalın ismi neyse)
+### Adım 4: İlk Çalıştırma ve Test
+Kurulum bitti! Bilgisayarı yeniden başlatabilir veya Görev Zamanlayıcı'da oluşturduğun göreve sağ tıklayıp "Çalıştır" diyebilirsin.
 
----
+## Test Etmek İçin:
 
-**Dosyaları GitHub'a başarıyla gönderdikten sonra, diğer bilgisayara geçip kurulumu yapmaya hazır mısın? İstersen son bir kez tüm PowerShell kodunu kontrol edelim.**
+- Sistem açıldığında ekran kilitlenecek mi? (İlk başta SistemKilitli: true ise kilitlemeli).
+
+- Çocuklara verdiğin "uzun metinli" şifreyi girince ekran açılıyor mu?
+
+- Küçük zamanlayıcı paneli köşede görünüyor mu?
+
+- Durdur butonuna basınca ekran tekrar kilitleniyor mu?
+
+## Son Kontrol Listesi
+- Config Güncelleme: config.json içindeki LastHour (21:00 gibi) ve AnaSifre değerlerini kendi istediğin değerlerle güncelledin mi?
+
+- Admin Şifresi: Kendi özel admin şifreni kimseye söyleme, bu şifre sistemin tüm kısıtlamalarını (Görev Yöneticisi dahil) anında açar.
