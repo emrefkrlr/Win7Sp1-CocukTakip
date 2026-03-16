@@ -1,78 +1,42 @@
-# 1. Kütüphaneleri en basit yöntemle yükle
-[void][System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
-[void][System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
+# 1. İlk olarak her şeyi bir 'Try-Catch' içine alalım
+try {
+    # STA Modu Kontrolü ve Form Yükleme
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
 
-$configPath = "C:\CocukTakip\config.json"
+    # Ekrana basit bir mesaj basalım (Konsolda görünmeli)
+    Write-Host "--- SISTEM BASLATILIYOR ---" -ForegroundColor Cyan
 
-# --- FONKSİYONLAR ---
-function Get-Config { 
-    if (Test-Path $configPath) {
-        $content = Get-Content $configPath -Raw
-        return $content | ConvertFrom-Json 
-    }
-}
-
-function Save-Config ($obj) { 
-    $obj | ConvertTo-Json | Set-Content $configPath 
-}
-
-# --- ANA EKRAN (EN SADE HALİ) ---
-function Show-LockScreen {
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "KILIT"
-    $form.WindowState = "Maximized"
-    $form.FormBorderStyle = "None"
-    $form.TopMost = $true
-    $form.BackColor = "Black"
-
-    $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = "SIFRE GIRINIZ"
-    $lbl.ForeColor = "White"
-    $lbl.Font = New-Object System.Drawing.Font("Arial", 24)
-    $lbl.Dock = "Fill"
-    $lbl.TextAlign = "MiddleCenter"
+    $configPath = "C:\CocukTakip\config.json"
     
-    $txt = New-Object System.Windows.Forms.TextBox
-    $txt.PasswordChar = "*"
-    $txt.Width = 200
-    $txt.Left = ($form.Width / 2) - 100
-    $txt.Top = ($form.Height / 2) + 100
+    # Config dosyasını oku
+    if (Test-Path $configPath) {
+        $cfg = Get-Content $configPath | ConvertFrom-Json
+        Write-Host "Config okundu. Aktif Cocuk: $($cfg.AktifCocuk)" -ForegroundColor Green
+    } else {
+        throw "Config dosyasi bulunamadi!"
+    }
+
+    # BASIT BIR TEST FORMU (Sadece ekranın açılıp açılmadığını görmek için)
+    $testForm = New-Object System.Windows.Forms.Form
+    $testForm.Text = "TEST EKRANI"
+    $testForm.Size = New-Object System.Drawing.Size(300,200)
+    $testForm.StartPosition = "CenterScreen"
     
     $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "TAMAM"
-    $btn.Top = $txt.Bottom + 10
-    $btn.Left = $txt.Left
-    $btn.ForeColor = "Black"
-    $btn.BackColor = "White"
+    $btn.Text = "TIKLA"
+    $btn.Dock = "Fill"
+    $btn.Add_Click({ [System.Windows.Forms.MessageBox]::Show("Form calisiyor!"); $testForm.Close() })
+    
+    $testForm.Controls.Add($btn)
+    
+    Write-Host "Form gosteriliyor... (Eger ekran gelmiyorsa burada takilmistir)" -ForegroundColor Yellow
+    $testForm.ShowDialog()
 
-    $btn.Add_Click({
-        $cfg = Get-Config
-        if ($txt.Text -like "*$($cfg.AnaSifre)*" -or $txt.Text -eq $cfg.AdminSifre) {
-            $cfg.SistemKilitli = $false
-            Save-Config $cfg
-            $form.Close()
-        } else {
-            [System.Windows.Forms.MessageBox]::Show("Hatali!")
-        }
-    })
-
-    $form.Controls.Add($lbl)
-    $form.Controls.Add($txt)
-    $form.Controls.Add($btn)
-    $form.ShowDialog()
-}
-
-# --- TEST MESAJI ---
-[System.Windows.Forms.MessageBox]::Show("Kod buraya kadar ulasti, simdi donguye giriyor.")
-
-while($true) {
-    $c = Get-Config
-    if ($c.SistemKilitli -eq $true) {
-        Show-LockScreen
-    } else {
-        # Panel yerine sadece bir mesaj kutusu verelim (Test için)
-        [System.Windows.Forms.MessageBox]::Show("Sure basladi! Durdurmak icin config dosyasini degistirin.")
-        break # Test amacli donguyu kiriyoruz
-    }
-    Start-Sleep -Seconds 2
+} catch {
+    # Hata varsa hem ekrana yaz hem dosyaya kaydet
+    $hata = "HATA: " + $_.Exception.Message
+    Write-Host $hata -ForegroundColor Red
+    $hata | Out-File "C:\CocukTakip\KRITIK_HATA.txt"
+    Read-Host "Devam etmek icin Enter'a basin..."
 }
