@@ -1,0 +1,9 @@
+{
+    "AnaSifre": "x9395",          // Çocukların şifresindeki gizli anahtar
+    "AdminSifre": "Admin123!",   // Sizin tam yetki şifreniz
+    "LastHour": "21:00",         // Bilgisayarın kapanacağı saat
+    "AktifCocuk": "Mirza",       // Sıradaki çocuk
+    "MirzaKalanSaniye": 3600,    // Kalan süreler
+    "YagizKalanSaniye": 3600,
+    "SistemKilitli": true        // Başlangıç durumu
+}
