@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Drawing
 $configPath = "C:\CocukTakip\config.json"
 $logPath = "C:\CocukTakip\log.txt"
 
-# --- LOGLAMA FONKSİYONU ---
+# --- LOGLAMA ---
 function Write-Log ($message) {
     $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     "$time - $message" | Out-File $logPath -Append -Encoding "UTF8"
@@ -93,7 +93,6 @@ function Show-LockScreen {
 
 function Show-TimerPanel {
     $c = Get-Config
-    # --- KRİTİK: HEDEF ZAMAN HESAPLAMA ---
     $kalan = if($c.AktifCocuk -match "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
     $script:targetTime = (Get-Date).AddSeconds($kalan)
     
@@ -128,7 +127,6 @@ function Show-TimerPanel {
 
     $timer.Add_Tick({
         if ($p.Visible -eq $false) { $timer.Stop(); return }
-        
         $cfg = Get-Config
         if ($cfg.AdminModu) { $info.Text = "ADMIN MODU"; return }
 
@@ -136,12 +134,10 @@ function Show-TimerPanel {
         $totalSeconds = [int]$diff.TotalSeconds
 
         if ((Get-Date -Format "HH:mm") -ge $cfg.LastHour) {
-            Write-Log "BILGI: Yatis saati geldi."
             $timer.Stop(); $cfg.SistemKilitli = $true; Save-Config $cfg; $p.Close()
         }
 
         if ($totalSeconds -le 0) {
-            Write-Log "BILGI: Sure bitti."
             if($cfg.AktifCocuk -match "Mirza") { $cfg.MirzaKalanSaniye = 3600; $cfg.AktifCocuk = "Yağız" } 
             else { $cfg.YagizKalanSaniye = 3600; $cfg.AktifCocuk = "Mirza" }
             $cfg.SistemKilitli = $true; Save-Config $cfg
@@ -154,16 +150,17 @@ function Show-TimerPanel {
     $p.Controls.AddRange(@($info, $btn)); $timer.Start(); $p.ShowDialog()
 }
 
-# --- 🚀 ACILIS AYARLARI (ZORUNLU SIFIRLAMA) ---
-Write-Log "SISTEM: Bilgisayar acildi, baslangic ayarlari yukleniyor."
+# --- 🚀 RESTART KORUMASI VE SIFIRLAMA ---
+# Bu blok bilgisayar her açıldığında döngüden önce bir kez çalışır.
+Write-Log "SISTEM: Bilgisayar acildi, tum sureler ve kilit sifirlaniyor."
 $baslangic = Get-Config
 if ($baslangic) {
-    $baslangic.SistemKilitli = $true    # Bilgisayar açıldığında mutlaka kilitli başla
-    $baslangic.AdminModu = $false      # Admin modunu kapat
-    $baslangic.MirzaKalanSaniye = 3600  # Süreleri 1 saate çek (İstemiyorsan bu satırı silebilirsin)
-    $baslangic.YagizKalanSaniye = 3600  # Süreleri 1 saate çek (İstemiyorsan bu satırı silebilirsin)
+    $baslangic.SistemKilitli = $true    # Açılışta ekranı kilitle
+    $baslangic.AdminModu = $false      # Admin modundan çık
+    $baslangic.MirzaKalanSaniye = 3600  # Mirza'ya 1 saat tanımla
+    $baslangic.YagizKalanSaniye = 3600  # Yağız'a 1 saat tanımla
     Save-Config $baslangic
-    Write-Log "SISTEM: Kilit aktif edildi ve sureler tazelendi."
+    Write-Log "SISTEM: SIFIRLAMA TAMAMLANDI."
 }
 
 # --- ANA DÖNGÜ ---
