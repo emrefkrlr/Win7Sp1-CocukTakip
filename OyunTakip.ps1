@@ -19,31 +19,27 @@ public class DragHelper {
     [DllImport("user32.dll")] public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
 }
 "@
-Add-Type -TypeDefinition $code
+if (-not ([System.Management.Automation.PSTypeName]"DragHelper").Type) { Add-Type -TypeDefinition $code }
 
 function Get-Config { 
     try {
         if (Test-Path $configPath) {
             $content = Get-Content $configPath -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrEmpty($content)) { return $null }
             return $content | ConvertFrom-Json 
         }
-    } catch { 
-        Write-Log "HATA: Config dosyasi okunurken hata olustu."
-        return $null 
-    }
+    } catch { return $null }
 }
 
 function Save-Config ($obj) { 
     try {
         $obj | ConvertTo-Json | Out-File $configPath -Encoding "UTF8" -Force
-    } catch { 
-        Write-Log "HATA: Config dosyasi kaydedilemedi."
-    }
+    } catch { Write-Log "HATA: Config kaydedilemedi." }
 }
 
 # --- KİLİT EKRANI ---
 function Show-LockScreen {
-    Write-Log "BILGI: Kilit ekrani gosteriliyor."
+    Write-Log "BILGI: Kilit ekrani acildi."
     $form = New-Object System.Windows.Forms.Form
     $form.WindowState = "Maximized"; $form.FormBorderStyle = "None"; $form.TopMost = $true
     $form.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 45)
@@ -85,20 +81,22 @@ function Show-LockScreen {
     $btnE.Add_Click({
         $c = Get-Config
         if ($txt.Text -eq $c.AdminSifre) {
-            Write-Log "GIRIS: Admin girisi yapildi."
+            Write-Log "GIRIS: Admin giris yapti."
             $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c; $form.Close()
         } elseif ($txt.Text.Contains($c.AnaSifre) -and (Get-Date -Format "HH:mm") -lt $c.LastHour) {
-            Write-Log "GIRIS: $($script:secili) kullanicisi giris yapti."
+            Write-Log "GIRIS: $($script:secili) oturumu basladi."
             $c.SistemKilitli = $false; $c.AdminModu = $false; $c.AktifCocuk = $script:secili; Save-Config $c; $form.Close()
-        } else { 
-            Write-Log "HATA: Hatali sifre denemesi: $($txt.Text)"
-            [System.Windows.Forms.MessageBox]::Show("Sifre Hatali veya Yatis Saati!") 
-        }
+        } else { Write-Log "HATA: Gecersiz giris denemesi." }
     })
     $form.Controls.AddRange(@($lbl, $btnM, $btnY, $txt, $btnE)); $form.ShowDialog()
 }
 
 function Show-TimerPanel {
+    $c = Get-Config
+    # --- KRİTİK: HEDEF ZAMAN HESAPLAMA ---
+    $kalan = if($c.AktifCocuk -match "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
+    $script:targetTime = (Get-Date).AddSeconds($kalan)
+    
     $p = New-Object System.Windows.Forms.Form
     $p.Size = "220,110"; $p.StartPosition = "Manual"; $p.Location = "20, 20"; $p.FormBorderStyle = "None"
     $p.TopMost = $true; $p.BackColor = "DarkSlateGray"; $p.Opacity = 0.85
@@ -111,60 +109,59 @@ function Show-TimerPanel {
     $info.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold); $info.Add_MouseDown($drag)
     
     $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "KILITLE"; $btn.Dock = "Bottom"; $btn.Height = 35; $btn.BackColor = "Orange"; $btn.FlatStyle = "Flat"
+    $btn.Text = "SISTEMI KILITLE"; $btn.Dock = "Bottom"; $btn.Height = 35; $btn.BackColor = "Orange"; $btn.FlatStyle = "Flat"
     
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 1000
     
     $btn.Add_Click({ 
-        Write-Log "BILGI: Durdur butonuna basildi, sistem kilitleniyor."
-        $timer.Stop(); $timer.Dispose(); $c = Get-Config; $c.SistemKilitli = $true; Save-Config $c; $p.Close() 
+        $timer.Stop(); $timer.Dispose()
+        $nowCfg = Get-Config
+        $diff = $script:targetTime - (Get-Date)
+        $kalanSn = [Math]::Max(0, [int]$diff.TotalSeconds)
+        
+        if($nowCfg.AktifCocuk -match "Mirza") { $nowCfg.MirzaKalanSaniye = $kalanSn } else { $nowCfg.YagizKalanSaniye = $kalanSn }
+        $nowCfg.SistemKilitli = $true; Save-Config $nowCfg
+        Write-Log "BILGI: Mola verildi. Kalan: $kalanSn sn"
+        $p.Close()
     })
 
     $timer.Add_Tick({
-        $c = Get-Config
-        if (!$c) { return }
-        if ($c.AdminModu) { $info.Text = "ADMIN MODU`nSURE ISLEMIYOR"; return }
-
-        $k = if($c.AktifCocuk -match "Mirza") {"MirzaKalanSaniye"} else {"YagizKalanSaniye"}
-        $c.$k -= 1
+        if ($p.Visible -eq $false) { $timer.Stop(); return } # Form kapaliysa calisma
         
-        # Her 5 dakikada bir log yaz (Saniye hizini kontrol etmek icin)
-        if ($c.$k % 300 -eq 0) { Write-Log "TAKIP: $($c.AktifCocuk) kalan saniye: $($c.$k)" }
+        $cfg = Get-Config
+        if ($cfg.AdminModu) { $info.Text = "ADMIN MODU"; return }
 
-        if ($c.$k -le 0 -or (Get-Date -Format "HH:mm") -ge $c.LastHour) {
-            Write-Log "BILGI: Sure bitti veya yatis saati geldi. $($c.AktifCocuk) oturumu sonlandi."
-            if ($c.$k -le 0) { 
-                $c.$k = 3600; 
-                $c.AktifCocuk = if($c.AktifCocuk -match "Mirza") {"Yağız"} else {"Mirza"} 
-                Write-Log "BILGI: Yeni aktif cocuk: $($c.AktifCocuk)"
-            }
-            $timer.Stop(); $timer.Dispose(); $c.SistemKilitli = $true; Save-Config $c; $p.Close()
+        $diff = $script:targetTime - (Get-Date)
+        $totalSeconds = [int]$diff.TotalSeconds
+
+        # Yatis saati kontrolü
+        if ((Get-Date -Format "HH:mm") -ge $cfg.LastHour) {
+            Write-Log "BILGI: Yatis saati geldi."
+            $timer.Stop(); $cfg.SistemKilitli = $true; Save-Config $cfg; $p.Close()
         }
-        Save-Config $c
-        $ts = [TimeSpan]::FromSeconds($c.$k)
-        $info.Text = $c.AktifCocuk.ToUpper() + "`n" + $ts.Minutes + " dk " + $ts.Seconds + " sn"
+
+        if ($totalSeconds -le 0) {
+            Write-Log "BILGI: Sure bitti."
+            if($cfg.AktifCocuk -match "Mirza") { $cfg.MirzaKalanSaniye = 3600; $cfg.AktifCocuk = "Yağız" } 
+            else { $cfg.YagizKalanSaniye = 3600; $cfg.AktifCocuk = "Mirza" }
+            $cfg.SistemKilitli = $true; Save-Config $cfg
+            $timer.Stop(); $timer.Dispose(); $p.Close()
+        }
+
+        $ts = [TimeSpan]::FromSeconds([Math]::Max(0, $totalSeconds))
+        $info.Text = $cfg.AktifCocuk.ToUpper() + "`nKalan: " + $ts.Minutes + " dk " + $ts.Seconds + " sn"
     })
     $p.Controls.AddRange(@($info, $btn)); $timer.Start(); $p.ShowDialog()
 }
 
-# --- BASLANGIC LOGU ---
-Write-Log "SISTEM: Uygulama baslatildi."
-
-# --- ACILIS SURE SIFIRLAMA ---
-$ilk = Get-Config
-if ($ilk) {
-    $ilk.MirzaKalanSaniye = 3600
-    $ilk.YagizKalanSaniye = 3600
-    $ilk.SistemKilitli = $true
-    Save-Config $ilk
-    Write-Log "SISTEM: Sureler 3600 sn olarak sifirlandi."
-}
-
+# --- ANA DÖNGÜ ---
+Write-Log "SISTEM: Baslatildi."
 while($true) {
     $c = Get-Config
-    if ($c) { 
-        if ($c.SistemKilitli) { Show-LockScreen } else { Show-TimerPanel } 
+    if ($c) {
+        # Sadece bir formun açık olduğundan emin ol
+        if ($c.SistemKilitli) { Show-LockScreen } else { Show-TimerPanel }
     }
     Start-Sleep -Seconds 1
 }
