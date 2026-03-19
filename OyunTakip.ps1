@@ -127,7 +127,7 @@ function Show-TimerPanel {
     })
 
     $timer.Add_Tick({
-        if ($p.Visible -eq $false) { $timer.Stop(); return } # Form kapaliysa calisma
+        if ($p.Visible -eq $false) { $timer.Stop(); return }
         
         $cfg = Get-Config
         if ($cfg.AdminModu) { $info.Text = "ADMIN MODU"; return }
@@ -135,7 +135,6 @@ function Show-TimerPanel {
         $diff = $script:targetTime - (Get-Date)
         $totalSeconds = [int]$diff.TotalSeconds
 
-        # Yatis saati kontrolü
         if ((Get-Date -Format "HH:mm") -ge $cfg.LastHour) {
             Write-Log "BILGI: Yatis saati geldi."
             $timer.Stop(); $cfg.SistemKilitli = $true; Save-Config $cfg; $p.Close()
@@ -155,12 +154,22 @@ function Show-TimerPanel {
     $p.Controls.AddRange(@($info, $btn)); $timer.Start(); $p.ShowDialog()
 }
 
+# --- 🚀 ACILIS AYARLARI (ZORUNLU SIFIRLAMA) ---
+Write-Log "SISTEM: Bilgisayar acildi, baslangic ayarlari yukleniyor."
+$baslangic = Get-Config
+if ($baslangic) {
+    $baslangic.SistemKilitli = $true    # Bilgisayar açıldığında mutlaka kilitli başla
+    $baslangic.AdminModu = $false      # Admin modunu kapat
+    $baslangic.MirzaKalanSaniye = 3600  # Süreleri 1 saate çek (İstemiyorsan bu satırı silebilirsin)
+    $baslangic.YagizKalanSaniye = 3600  # Süreleri 1 saate çek (İstemiyorsan bu satırı silebilirsin)
+    Save-Config $baslangic
+    Write-Log "SISTEM: Kilit aktif edildi ve sureler tazelendi."
+}
+
 # --- ANA DÖNGÜ ---
-Write-Log "SISTEM: Baslatildi."
 while($true) {
     $c = Get-Config
     if ($c) {
-        # Sadece bir formun açık olduğundan emin ol
         if ($c.SistemKilitli) { Show-LockScreen } else { Show-TimerPanel }
     }
     Start-Sleep -Seconds 1
