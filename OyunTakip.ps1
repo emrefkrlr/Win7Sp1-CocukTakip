@@ -5,12 +5,13 @@ $configPath = "C:\CocukTakip\config.json"
 $logPath = "C:\CocukTakip\log.txt"
 $usagePath = "C:\CocukTakip\kullanim.txt"
 
+# --- LOG ---
 function Write-Log ($status, $message) {
     $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     "[$time] [$status] >> $message" | Out-File $logPath -Append -Encoding "UTF8"
 }
 
-# ================= KULLANIM LOG =================
+# --- KULLANIM TAKİP ---
 $global:baslangicSureleri = @{}
 
 function Init-UsageTracking {
@@ -28,15 +29,12 @@ function Write-UsageLog {
     $today = Get-Date -Format "dd.MM.yyyy"
 
     foreach ($cocuk in @("Mirza","Yağız")) {
-
         $ilk = $global:baslangicSureleri[$cocuk]
         $son = if ($cocuk -eq "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
 
         if ($ilk -ne $null -and $son -ne $null) {
             $kullanilan = $ilk - $son
-
             if ($kullanilan -gt 0) {
-
                 $saat = [math]::Floor($kullanilan / 3600)
                 $dk   = [math]::Floor(($kullanilan % 3600) / 60)
 
@@ -53,35 +51,23 @@ function Write-UsageLog {
     }
 }
 
-# ================= SAAT KONTROL =================
-function Is-AllowedTime {
-
-    $now = Get-Date
-    $day = $now.DayOfWeek
-
-    if ($day -in @("Saturday","Sunday")) {
-        $slots = $config.HaftaSonu
-    } else {
-        $slots = $config.HaftaIci
-    }
-
-    foreach ($slot in $slots) {
-        $start = Get-Date "$($now.ToShortDateString()) $($slot.start)"
-        $end   = Get-Date "$($now.ToShortDateString()) $($slot.end)"
-
-        if ($now -ge $start -and $now -le $end) {
-            return $true
-        }
-    }
-
-    return $false
+# --- DRAG ---
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+public class DragHelper {
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
 }
+"@
+if (-not ([System.Management.Automation.PSTypeName]"DragHelper").Type) { Add-Type -TypeDefinition $code }
 
-# ================= CONFIG =================
 function Get-Config { 
     try {
         if (Test-Path $configPath) {
-            return (Get-Content $configPath -Raw | ConvertFrom-Json)
+            $content = Get-Content $configPath -Raw
+            if ([string]::IsNullOrEmpty($content)) { return $null }
+            return $content | ConvertFrom-Json 
         }
     } catch { return $null }
 }
@@ -90,7 +76,29 @@ function Save-Config ($obj) {
     $obj | ConvertTo-Json | Out-File $configPath -Encoding "UTF8" -Force
 }
 
-# ================= LOCK SCREEN =================
+# --- SAAT KONTROL ---
+function Is-AllowedTime {
+    $c = Get-Config
+    if ($c.AdminModu) { return $true }
+
+    $now = Get-Date
+    $day = $now.DayOfWeek
+
+    if ($day -in @("Saturday","Sunday")) {
+        $slots = $c.HaftaSonu
+    } else {
+        $slots = $c.HaftaIci
+    }
+
+    foreach ($slot in $slots) {
+        $start = Get-Date "$($now.ToShortDateString()) $($slot.start)"
+        $end   = Get-Date "$($now.ToShortDateString()) $($slot.end)"
+        if ($now -ge $start -and $now -le $end) { return $true }
+    }
+    return $false
+}
+
+# --- KİLİT EKRANI ---
 function Show-LockScreen {
 
     $form = New-Object System.Windows.Forms.Form
@@ -113,25 +121,18 @@ function Show-LockScreen {
 
     $btnM = New-Object System.Windows.Forms.Button
     $btnM.Text = "MIRZA"; $btnM.Size = "145,50"; $btnM.Top = ($scrH / 2) - 100
-    $btnM.Left = ($scrW / 2) - 150; $btnM.FlatStyle = "Flat"; $btnM.ForeColor = "White"
+    $btnM.Left = ($scrW / 2) - 150
 
     $btnY = New-Object System.Windows.Forms.Button
     $btnY.Text = "YAĞIZ"; $btnY.Size = "145,50"; $btnY.Top = ($scrH / 2) - 100
-    $btnY.Left = ($scrW / 2) + 5; $btnY.FlatStyle = "Flat"; $btnY.ForeColor = "White"
+    $btnY.Left = ($scrW / 2) + 5
 
-    $upd = {
-        if ($script:secili -match "Mirza") { $btnM.BackColor = "SteelBlue"; $btnY.BackColor = "DimGray" }
-        else { $btnY.BackColor = "SteelBlue"; $btnM.BackColor = "DimGray" }
-    }
-    &$upd
-
-    $btnM.Add_Click({ $script:secili = "Mirza"; &$upd })
-    $btnY.Add_Click({ $script:secili = "Yağız"; &$upd })
+    $btnM.Add_Click({ $script:secili = "Mirza" })
+    $btnY.Add_Click({ $script:secili = "Yağız" })
 
     $txt = New-Object System.Windows.Forms.TextBox
     $txt.PasswordChar = "*"
     $txt.Size = "300,40"
-    $txt.Font = New-Object System.Drawing.Font("Arial", 18)
     $txt.Left = ($scrW / 2) - 150
     $txt.Top = ($scrH / 2) + 10
 
@@ -144,8 +145,6 @@ function Show-LockScreen {
     $btnE = New-Object System.Windows.Forms.Button
     $btnE.Text = "SISTEMI AC"
     $btnE.Size = "300,50"
-    $btnE.BackColor = "SteelBlue"
-    $btnE.ForeColor = "White"
     $btnE.Left = $txt.Left
     $btnE.Top = $txt.Bottom + 40
 
@@ -171,6 +170,7 @@ function Show-LockScreen {
         }
 
         if ($input -eq $c.AnaSifre.ToLower()) {
+            Init-UsageTracking
             $c.SistemKilitli = $false
             $c.AdminModu = $false
             $c.AktifCocuk = $script:secili
@@ -185,53 +185,56 @@ function Show-LockScreen {
     $form.ShowDialog()
 }
 
-# ================= TIMER =================
+# --- TIMER PANEL (ORİJİNAL KORUNDU) ---
 function Show-TimerPanel {
 
-    Init-UsageTracking
-
     $c = Get-Config
-    $kalanSn = if($c.AktifCocuk -eq "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
-    $target = (Get-Date).AddSeconds($kalanSn)
+    $now = Get-Date
+    $kalanSn = if($c.AktifCocuk -match "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
+
+    $script:targetTime = $now.AddSeconds($kalanSn)
 
     $p = New-Object System.Windows.Forms.Form
-    $p.Size = "220,110"
-    $p.TopMost = $true
-    $p.BackColor = "DarkSlateGray"
+    $p.Size = "220,110"; $p.StartPosition = "Manual"; $p.Location = "20, 20"; $p.FormBorderStyle = "None"
+    $p.TopMost = $true; $p.BackColor = "DarkSlateGray"; $p.Opacity = 0.85
 
     $info = New-Object System.Windows.Forms.Label
-    $info.Dock = "Fill"
-    $info.ForeColor = "White"
-    $info.TextAlign = "MiddleCenter"
+    $info.ForeColor = "White"; $info.Dock = "Fill"; $info.TextAlign = "MiddleCenter"
+
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = "MOLA VER (KILITLE)"; $btn.Dock = "Bottom"; $btn.Height = 35
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 1000
 
-    $timer.Add_Tick({
-
+    $btn.Add_Click({
+        Write-UsageLog
+        $timer.Stop()
         $cfg = Get-Config
+        $cfg.SistemKilitli = $true
+        Save-Config $cfg
+        $p.Close()
+    })
+
+    $timer.Add_Tick({
 
         if (-not (Is-AllowedTime)) {
             Write-UsageLog
+            $cfg = Get-Config
             $cfg.SistemKilitli = $true
             Save-Config $cfg
             $timer.Stop()
             $p.Close()
         }
 
-        $diff = $target - (Get-Date)
+        $cfg = Get-Config
+        $diff = $script:targetTime - (Get-Date)
         $sec = [int]$diff.TotalSeconds
 
         if ($sec -le 0) {
             Write-UsageLog
-
-            if($cfg.AktifCocuk -eq "Mirza") {
-                $cfg.MirzaKalanSaniye = 3600
-                $cfg.AktifCocuk = "Yağız"
-            } else {
-                $cfg.YagizKalanSaniye = 3600
-                $cfg.AktifCocuk = "Mirza"
-            }
+            if($cfg.AktifCocuk -match "Mirza") { $cfg.MirzaKalanSaniye = 3600; $cfg.AktifCocuk = "Yağız" } 
+            else { $cfg.YagizKalanSaniye = 3600; $cfg.AktifCocuk = "Mirza" }
 
             $cfg.SistemKilitli = $true
             Save-Config $cfg
@@ -239,16 +242,16 @@ function Show-TimerPanel {
             $p.Close()
         }
 
-        $ts = [TimeSpan]::FromSeconds([Math]::Max(0,$sec))
-        $info.Text = "$($cfg.AktifCocuk)`n$($ts.Minutes) dk $($ts.Seconds) sn"
+        $ts = [TimeSpan]::FromSeconds([Math]::Max(0, $sec))
+        $info.Text = $cfg.AktifCocuk + "`n" + $ts.Minutes + " dk " + $ts.Seconds + " sn"
     })
 
-    $p.Controls.Add($info)
+    $p.Controls.AddRange(@($info, $btn))
     $timer.Start()
     $p.ShowDialog()
 }
 
-# ================= RESET =================
+# --- RESET ---
 $baslangic = Get-Config
 $baslangic.SistemKilitli = $true
 $baslangic.AdminModu = $false
@@ -256,8 +259,8 @@ $baslangic.MirzaKalanSaniye = 3600
 $baslangic.YagizKalanSaniye = 3600
 Save-Config $baslangic
 
-# ================= LOOP =================
+# --- LOOP ---
 while($true){
-    $config = Get-Config
-    if($config.SistemKilitli){ Show-LockScreen } else { Show-TimerPanel }
+    $c = Get-Config
+    if($c.SistemKilitli){ Show-LockScreen } else { Show-TimerPanel }
 }
