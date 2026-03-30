@@ -6,12 +6,13 @@
     "YagizKalanSaniye": 3600,
     "SistemKilitli": true,
     "AdminModu": false,
-
-    "HaftaIci": [
-        { "start": "08:30", "end": "17:00" },
-        { "start": "18:30", "end": "21:30" }
-    ],
-    "HaftaSonu": [
-        { "start": "08:30", "end": "22:45" }
-    ]
+    "Izinler": {
+        "HaftaIci": [
+            {"Bas": "08:30", "Bit": "17:00"},
+            {"Bas": "18:30", "Bit": "21:30"}
+        ],
+        "HaftaSonu": [
+            {"Bas": "08:30", "Bit": "22:45"}
+        ]
+    }
 }

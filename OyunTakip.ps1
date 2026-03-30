@@ -3,255 +3,181 @@ Add-Type -AssemblyName System.Drawing
 
 $configPath = "C:\CocukTakip\config.json"
 $logPath = "C:\CocukTakip\log.txt"
-$usagePath = "C:\CocukTakip\kullanim.txt"
 
-# --- LOG ---
+# --- LOGLAMA ---
 function Write-Log ($status, $message) {
     $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     "[$time] [$status] >> $message" | Out-File $logPath -Append -Encoding "UTF8"
 }
 
-# --- KULLANIM TAKİP ---
-$global:baslangicSureleri = @{}
-
-function Init-UsageTracking {
-    $c = Get-Config
-    if ($c) {
-        $global:baslangicSureleri["Mirza"] = $c.MirzaKalanSaniye
-        $global:baslangicSureleri["Yağız"] = $c.YagizKalanSaniye
-    }
-}
-
-function Write-UsageLog {
-    $c = Get-Config
-    if (-not $c) { return }
-
-    $today = Get-Date -Format "dd.MM.yyyy"
-
-    foreach ($cocuk in @("Mirza","Yağız")) {
-        $ilk = $global:baslangicSureleri[$cocuk]
-        $son = if ($cocuk -eq "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
-
-        if ($ilk -ne $null -and $son -ne $null) {
-            $kullanilan = $ilk - $son
-            if ($kullanilan -gt 0) {
-                $saat = [math]::Floor($kullanilan / 3600)
-                $dk   = [math]::Floor(($kullanilan % 3600) / 60)
-
-                $text = ""
-                if ($saat -gt 0) { $text += "$saat Sa " }
-                if ($dk -gt 0) { $text += "$dk dk" }
-
-                if ($text -ne "") {
-                    "$today - $cocuk - $text" | Out-File $usagePath -Append -Encoding UTF8
-                    Write-Log "KULLANIM" "$today - $cocuk - $text"
-                }
-            }
-        }
-    }
-}
-
-# --- DRAG ---
+# --- YARDIMCI SINIFLAR ---
 $code = @"
 using System;
 using System.Runtime.InteropServices;
-public class DragHelper {
+public class Win32 {
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
 }
 "@
-if (-not ([System.Management.Automation.PSTypeName]"DragHelper").Type) { Add-Type -TypeDefinition $code }
+if (-not ([System.Management.Automation.PSTypeName]"Win32").Type) { Add-Type -TypeDefinition $code }
 
+# --- FONKSIYONLAR ---
 function Get-Config { 
-    try {
-        if (Test-Path $configPath) {
-            $content = Get-Content $configPath -Raw
-            if ([string]::IsNullOrEmpty($content)) { return $null }
-            return $content | ConvertFrom-Json 
-        }
-    } catch { return $null }
+    if (Test-Path $configPath) {
+        return Get-Content $configPath -Raw | ConvertFrom-Json 
+    }
 }
 
 function Save-Config ($obj) { 
     $obj | ConvertTo-Json | Out-File $configPath -Encoding "UTF8" -Force
 }
 
-# --- SAAT KONTROL ---
-function Is-AllowedTime {
-    $c = Get-Config
-    if ($c.AdminModu) { return $true }
-
-    $now = Get-Date
-    $day = $now.DayOfWeek
-
-    if ($day -in @("Saturday","Sunday")) {
-        $slots = $c.HaftaSonu
-    } else {
-        $slots = $c.HaftaIci
-    }
-
-    foreach ($slot in $slots) {
-        $start = Get-Date "$($now.ToShortDateString()) $($slot.start)"
-        $end   = Get-Date "$($now.ToShortDateString()) $($slot.end)"
-        if ($now -ge $start -and $now -le $end) { return $true }
+function Check-TimePermit {
+    $cfg = Get-Config
+    $now = Get-Date -Format "HH:mm"
+    $day = (Get-Date).DayOfWeek
+    $isWeekend = ($day -eq "Saturday" -or $day -eq "Sunday")
+    $permits = if ($isWeekend) { $cfg.Izinler.HaftaSonu } else { $cfg.Izinler.HaftaIci }
+    
+    foreach ($p in $permits) {
+        if ($now -ge $p.Bas -and $now -lt $p.Bit) { return $true }
     }
     return $false
 }
 
-# --- KİLİT EKRANI ---
+# --- KİLİT EKRANI (V2 macOS Style) ---
 function Show-LockScreen {
-
+    $cfg = Get-Config
     $form = New-Object System.Windows.Forms.Form
-    $form.WindowState = "Maximized"; $form.FormBorderStyle = "None"; $form.TopMost = $true
-    $form.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 45)
+    $form.Text = "Sistem Kilitli"; $form.FormBorderStyle = "None"
+    $form.WindowState = "Maximized"; $form.TopMost = $true
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30) # Dark Mode
 
     $scrW = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
     $scrH = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
 
-    $cfg = Get-Config
-    $script:secili = if ($cfg.AktifCocuk) { $cfg.AktifCocuk } else { "Mirza" }
-
+    # Başlık
     $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = "KULLANICI SECIN VE SIFRE GIRIN"
-    $lbl.ForeColor = "White"
-    $lbl.Font = New-Object System.Drawing.Font("Arial", 22, [System.Drawing.FontStyle]::Bold)
-    $lbl.TextAlign = "MiddleCenter"
-    $lbl.Size = "$($scrW), 80"
-    $lbl.Top = ($scrH / 2) - 200
+    $lbl.Text = "LÜTFEN OTURUM AÇIN"; $lbl.ForeColor = "White"
+    $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 24, [System.Drawing.FontStyle]::Bold)
+    $lbl.TextAlign = "MiddleCenter"; $lbl.Size = "$($scrW), 60"; $lbl.Top = ($scrH / 2) - 250
 
+    # İzin Saatleri Bilgisi (Geliştirme 3)
+    $dayInfo = New-Object System.Windows.Forms.Label
+    $day = (Get-Date).DayOfWeek
+    $txtIzin = if ($day -eq "Saturday" -or $day -eq "Sunday") { "Hafta Sonu İzni: 08:30 - 22:45" } else { "Hafta İçi İzni: 08:30-17:00 / 18:30-21:30" }
+    $dayInfo.Text = $txtIzin; $dayInfo.ForeColor = "Gray"; $dayInfo.TextAlign = "MiddleCenter"
+    $dayInfo.Size = "$($scrW), 30"; $dayInfo.Top = $lbl.Bottom + 10; $dayInfo.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+
+    # Çocuk Seçimi (Butonlar)
+    $script:secili = "Mirza"
     $btnM = New-Object System.Windows.Forms.Button
-    $btnM.Text = "MIRZA"; $btnM.Size = "145,50"; $btnM.Top = ($scrH / 2) - 100
-    $btnM.Left = ($scrW / 2) - 150
-
+    $btnM.Text = "MIRZA"; $btnM.Size = "150,150"; $btnM.Top = ($scrH / 2) - 100; $btnM.Left = ($scrW / 2) - 160
+    $btnM.FlatStyle = "Flat"; $btnM.FlatAppearance.BorderSize = 0; $btnM.Cursor = "Hand"
+    
     $btnY = New-Object System.Windows.Forms.Button
-    $btnY.Text = "YAĞIZ"; $btnY.Size = "145,50"; $btnY.Top = ($scrH / 2) - 100
-    $btnY.Left = ($scrW / 2) + 5
+    $btnY.Text = "YAĞIZ"; $btnY.Size = "150,150"; $btnY.Top = ($scrH / 2) - 100; $btnY.Left = ($scrW / 2) + 10
+    $btnY.FlatStyle = "Flat"; $btnY.FlatAppearance.BorderSize = 0; $btnY.Cursor = "Hand"
 
-    $btnM.Add_Click({ $script:secili = "Mirza" })
-    $btnY.Add_Click({ $script:secili = "Yağız" })
+    $updUI = {
+        if ($script:secili -eq "Mirza") { 
+            $btnM.BackColor = "SteelBlue"; $btnY.BackColor = "DimGray" 
+        } else { 
+            $btnY.BackColor = "SteelBlue"; $btnM.BackColor = "DimGray" 
+        }
+    }
+    &$updUI
 
+    $btnM.Add_Click({ $script:secili = "Mirza"; &$updUI })
+    $btnY.Add_Click({ $script:secili = "Yağız"; &$updUI })
+
+    # Şifre Kutusu
     $txt = New-Object System.Windows.Forms.TextBox
-    $txt.PasswordChar = "*"
-    $txt.Size = "300,40"
-    $txt.Left = ($scrW / 2) - 150
-    $txt.Top = ($scrH / 2) + 10
-
-    $msg = New-Object System.Windows.Forms.Label
-    $msg.ForeColor = "Red"
-    $msg.Size = "400,30"
-    $msg.Left = $txt.Left
-    $msg.Top = $txt.Bottom + 5
-
+    $txt.PasswordChar = "●"; $txt.Size = "320,40"; $txt.Font = New-Object System.Drawing.Font("Segoe UI", 16)
+    $txt.Left = ($scrW / 2) - 160; $txt.Top = $btnM.Bottom + 30; $txt.TextAlign = "Center"
+    
     $btnE = New-Object System.Windows.Forms.Button
-    $btnE.Text = "SISTEMI AC"
-    $btnE.Size = "300,50"
-    $btnE.Left = $txt.Left
-    $btnE.Top = $txt.Bottom + 40
-
+    $btnE.Text = "GİRİŞ YAP"; $btnE.Size = "320,50"; $btnE.BackColor = "DodgerBlue"; $btnE.ForeColor = "White"
+    $btnE.FlatStyle = "Flat"; $btnE.Left = $txt.Left; $btnE.Top = $txt.Bottom + 20
+    
     $btnE.Add_Click({
-
         $c = Get-Config
-        $input = $txt.Text.ToLower()
-
-        if ($input -eq $c.AdminSifre.ToLower()) {
-            $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c; $form.Close(); return
-        }
-
-        if (-not (Is-AllowedTime)) {
-            $msg.Text = "Bu saatlerde kullanamazsın!"
-            return
-        }
-
-        $kalan = if ($script:secili -eq "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
-
-        if ($kalan -le 0) {
-            $msg.Text = "Bugünkü süren doldu!"
-            return
-        }
-
-        if ($input -eq $c.AnaSifre.ToLower()) {
-            Init-UsageTracking
-            $c.SistemKilitli = $false
-            $c.AdminModu = $false
-            $c.AktifCocuk = $script:secili
-            Save-Config $c
-            $form.Close()
+        # Şifre Karşılaştırma: ToLower() ile Case-Insensitive (Problem 3)
+        if ($txt.Text -eq $c.AdminSifre) {
+            $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c; $form.Close()
+        } elseif ($txt.Text.ToLower().Contains($c.AnaSifre.ToLower())) {
+            if (Check-TimePermit) {
+                $c.SistemKilitli = $false; $c.AdminModu = $false; $c.AktifCocuk = $script:secili; Save-Config $c; $form.Close()
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Şu an bilgisayar kullanım saati dışındasınız!", "Zaman Sınırı")
+            }
         } else {
-            $msg.Text = "Şifre hatalı!"
+            $txt.Text = ""; $txt.PlaceholderText = "Hatalı Şifre!"
         }
     })
 
-    $form.Controls.AddRange(@($lbl,$btnM,$btnY,$txt,$btnE,$msg))
+    $form.Controls.AddRange(@($lbl, $dayInfo, $btnM, $btnY, $txt, $btnE))
+    $form.Add_Shown({ [Win32]::SetForegroundWindow($form.Handle) })
     $form.ShowDialog()
 }
 
-# --- TIMER PANEL (ORİJİNAL KORUNDU) ---
+# --- ZAMAN PANELI (Geliştirme 4: macOS Compact Style) ---
 function Show-TimerPanel {
-
     $c = Get-Config
-    $now = Get-Date
-    $kalanSn = if($c.AktifCocuk -match "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
-
-    $script:targetTime = $now.AddSeconds($kalanSn)
-
+    $script:kalanSn = if($c.AktifCocuk -match "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
+    
     $p = New-Object System.Windows.Forms.Form
-    $p.Size = "220,110"; $p.StartPosition = "Manual"; $p.Location = "20, 20"; $p.FormBorderStyle = "None"
-    $p.TopMost = $true; $p.BackColor = "DarkSlateGray"; $p.Opacity = 0.85
+    $p.Size = "200,80"; $p.StartPosition = "Manual"; $p.Location = "20, 20"; $p.FormBorderStyle = "None"
+    $p.TopMost = $true; $p.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45); $p.Opacity = 0.9
 
-    $info = New-Object System.Windows.Forms.Label
-    $info.ForeColor = "White"; $info.Dock = "Fill"; $info.TextAlign = "MiddleCenter"
-
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.ForeColor = "White"; $lbl.Dock = "Fill"; $lbl.TextAlign = "MiddleCenter"
+    $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+    
     $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "MOLA VER (KILITLE)"; $btn.Dock = "Bottom"; $btn.Height = 35
+    $btn.Text = "MOLA (KİLİTLE)"; $btn.Dock = "Bottom"; $btn.Height = 25; $btn.BackColor = "#E67E22"; $btn.FlatStyle = "Flat"
+    $btn.ForeColor = "White"; $btn.Font = New-Object System.Drawing.Font("Segoe UI", 8)
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 1000
-
-    $btn.Add_Click({
-        Write-UsageLog
-        $timer.Stop()
-        $cfg = Get-Config
-        $cfg.SistemKilitli = $true
-        Save-Config $cfg
-        $p.Close()
+    
+    $btn.Add_Click({ 
+        $timer.Stop(); 
+        $nowCfg = Get-Config
+        if($nowCfg.AktifCocuk -match "Mirza") { $nowCfg.MirzaKalanSaniye = $script:kalanSn } else { $nowCfg.YagizKalanSaniye = $script:kalanSn }
+        $nowCfg.SistemKilitli = $true; Save-Config $nowCfg; $p.Close()
     })
 
     $timer.Add_Tick({
+        $cfg = Get-Config
+        if ($cfg.AdminModu) { $lbl.Text = "ADMIN MODU"; return }
+        
+        $script:kalanSn--
 
-        if (-not (Is-AllowedTime)) {
-            Write-UsageLog
-            $cfg = Get-Config
-            $cfg.SistemKilitli = $true
-            Save-Config $cfg
-            $timer.Stop()
-            $p.Close()
+        if (-not (Check-TimePermit)) {
+            Write-Log "ENGEL" "İzin saati bitti."
+            $timer.Stop(); $cfg.SistemKilitli = $true; Save-Config $cfg; $p.Close()
         }
 
-        $cfg = Get-Config
-        $diff = $script:targetTime - (Get-Date)
-        $sec = [int]$diff.TotalSeconds
-
-        if ($sec -le 0) {
-            Write-UsageLog
+        if ($script:kalanSn -le 0) {
+            Write-Log "BITIS" "Süre doldu."
             if($cfg.AktifCocuk -match "Mirza") { $cfg.MirzaKalanSaniye = 3600; $cfg.AktifCocuk = "Yağız" } 
             else { $cfg.YagizKalanSaniye = 3600; $cfg.AktifCocuk = "Mirza" }
-
-            $cfg.SistemKilitli = $true
-            Save-Config $cfg
-            $timer.Stop()
-            $p.Close()
+            $cfg.SistemKilitli = $true; Save-Config $cfg
+            $timer.Stop(); $p.Close()
         }
 
-        $ts = [TimeSpan]::FromSeconds([Math]::Max(0, $sec))
-        $info.Text = $cfg.AktifCocuk + "`n" + $ts.Minutes + " dk " + $ts.Seconds + " sn"
+        $ts = [TimeSpan]::FromSeconds($script:kalanSn)
+        $lbl.Text = "$($cfg.AktifCocuk.ToUpper())`n$($ts.Minutes) dk $($ts.Seconds) sn"
     })
-
-    $p.Controls.AddRange(@($info, $btn))
-    $timer.Start()
-    $p.ShowDialog()
+    
+    $p.Controls.AddRange(@($lbl, $btn))
+    $timer.Start(); $p.ShowDialog()
 }
 
-# --- RESET ---
+# --- ANA AKIŞ ---
+Write-Log "RESTART" "Bilgisayar açıldı, süreler ve kilit sıfırlandı." # Geliştirme 2
 $baslangic = Get-Config
 $baslangic.SistemKilitli = $true
 $baslangic.AdminModu = $false
@@ -259,8 +185,13 @@ $baslangic.MirzaKalanSaniye = 3600
 $baslangic.YagizKalanSaniye = 3600
 Save-Config $baslangic
 
-# --- LOOP ---
-while($true){
+while($true) {
     $c = Get-Config
-    if($c.SistemKilitli){ Show-LockScreen } else { Show-TimerPanel }
+    if ($c.SistemKilitli) { 
+        # Güvenlik: Kilitliyken explorer'ı kısıtla (Opsiyonel: stop-process -name explorer -force)
+        Show-LockScreen 
+    } else { 
+        Show-TimerPanel 
+    }
+    Start-Sleep -Seconds 1
 }
