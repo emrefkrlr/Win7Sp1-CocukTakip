@@ -1,0 +1,187 @@
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$configPath = "C:\CocukTakip\config.json"
+$logPath = "C:\CocukTakip\log.txt"
+
+# --- GELİŞMİŞ LOGLAMA ---
+function Write-Log ($status, $message) {
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "[$time] [$status] >> $message" | Out-File $logPath -Append -Encoding "UTF8"
+}
+
+# --- SÜRÜKLEME DESTEĞİ ---
+$code = @"
+using System;
+using System.Runtime.InteropServices;
+public class DragHelper {
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+}
+"@
+if (-not ([System.Management.Automation.PSTypeName]"DragHelper").Type) { Add-Type -TypeDefinition $code }
+
+function Get-Config { 
+    try {
+        if (Test-Path $configPath) {
+            $content = Get-Content $configPath -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrEmpty($content)) { return $null }
+            return $content | ConvertFrom-Json 
+        }
+    } catch { return $null }
+}
+
+function Save-Config ($obj) { 
+    try {
+        $obj | ConvertTo-Json | Out-File $configPath -Encoding "UTF8" -Force
+    } catch { Write-Log "HATA" "Config dosyasi kaydedilemedi!" }
+}
+
+# --- KİLİT EKRANI ---
+function Show-LockScreen {
+    Write-Log "EKRAN" "Kilit ekrani yuklendi. Secim bekleniyor."
+    $form = New-Object System.Windows.Forms.Form
+    $form.WindowState = "Maximized"; $form.FormBorderStyle = "None"; $form.TopMost = $true
+    $form.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 45)
+    $scrW = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
+    $scrH = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
+
+    $cfg = Get-Config
+    $script:secili = if ($cfg.AktifCocuk) { $cfg.AktifCocuk } else { "Mirza" }
+
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = "KULLANICI SECIN VE SIFRE GIRIN"; $lbl.ForeColor = "White"
+    $lbl.Font = New-Object System.Drawing.Font("Arial", 22, [System.Drawing.FontStyle]::Bold)
+    $lbl.TextAlign = "MiddleCenter"; $lbl.Size = "$($scrW), 80"; $lbl.Top = ($scrH / 2) - 200
+    
+    $btnM = New-Object System.Windows.Forms.Button
+    $btnM.Text = "MIRZA"; $btnM.Size = "145,50"; $btnM.Top = ($scrH / 2) - 100
+    $btnM.Left = ($scrW / 2) - 150; $btnM.FlatStyle = "Flat"; $btnM.ForeColor = "White"
+    
+    $btnY = New-Object System.Windows.Forms.Button
+    $btnY.Text = "YAĞIZ"; $btnY.Size = "145,50"; $btnY.Top = ($scrH / 2) - 100
+    $btnY.Left = ($scrW / 2) + 5; $btnY.FlatStyle = "Flat"; $btnY.ForeColor = "White"
+
+    $upd = {
+        if ($script:secili -match "Mirza") { $btnM.BackColor = "SteelBlue"; $btnY.BackColor = "DimGray" }
+        else { $btnY.BackColor = "SteelBlue"; $btnM.BackColor = "DimGray" }
+    }
+    &$upd
+    $btnM.Add_Click({ $script:secili = "Mirza"; &$upd; Write-Log "SECIM" "Mirza secildi." })
+    $btnY.Add_Click({ $script:secili = "Yağız"; &$upd; Write-Log "SECIM" "Yagiz secildi." })
+
+    $txt = New-Object System.Windows.Forms.TextBox
+    $txt.PasswordChar = "*"; $txt.Size = "300,40"; $txt.Font = New-Object System.Drawing.Font("Arial", 18)
+    $txt.Left = ($scrW / 2) - 150; $txt.Top = ($scrH / 2) + 10
+    
+    $btnE = New-Object System.Windows.Forms.Button
+    $btnE.Text = "SISTEMI AC"; $btnE.Size = "300,50"; $btnE.BackColor = "SteelBlue"; $btnE.ForeColor = "White"
+    $btnE.Left = $txt.Left; $btnE.Top = $txt.Bottom + 20
+    
+    $btnE.Add_Click({
+        $c = Get-Config
+        if ($txt.Text -eq $c.AdminSifre) {
+            Write-Log "GIRIS" "Admin modu aktif edildi."
+            $c.SistemKilitli = $false; $c.AdminModu = $true; Save-Config $c; $form.Close()
+        } elseif ($txt.Text.Contains($c.AnaSifre) -and (Get-Date -Format "HH:mm") -lt $c.LastHour) {
+            Write-Log "GIRIS" "$($script:secili) basariyla giris yapti."
+            $c.SistemKilitli = $false; $c.AdminModu = $false; $c.AktifCocuk = $script:secili; Save-Config $c; $form.Close()
+        } else { 
+            Write-Log "HATA" "Hatali sifre veya yatis saati engeli: $($txt.Text)"
+        }
+    })
+    $form.Controls.AddRange(@($lbl, $btnM, $btnY, $txt, $btnE)); $form.ShowDialog()
+}
+
+function Show-TimerPanel {
+    $c = Get-Config
+    $now = Get-Date
+    $kalanSn = if($c.AktifCocuk -match "Mirza") { $c.MirzaKalanSaniye } else { $c.YagizKalanSaniye }
+    
+    # --- HEDEF ZAMAN HESABI VE DETAYLI LOG ---
+    $script:targetTime = $now.AddSeconds($kalanSn)
+    Write-Log "PANEL" "$($c.AktifCocuk) oturumu acildi | Su an: $($now.ToString('HH:mm:ss')) | Kalan sn: $kalanSn | HEDEF: $($script:targetTime.ToString('HH:mm:ss'))"
+    
+    $p = New-Object System.Windows.Forms.Form
+    $p.Size = "220,110"; $p.StartPosition = "Manual"; $p.Location = "20, 20"; $p.FormBorderStyle = "None"
+    $p.TopMost = $true; $p.BackColor = "DarkSlateGray"; $p.Opacity = 0.85
+
+    $drag = { [DragHelper]::ReleaseCapture(); [DragHelper]::SendMessage($p.Handle, 0xA1, 0x2, 0) }
+    $p.Add_MouseDown($drag)
+
+    $info = New-Object System.Windows.Forms.Label
+    $info.ForeColor = "White"; $info.Dock = "Fill"; $info.TextAlign = "MiddleCenter"
+    $info.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold); $info.Add_MouseDown($drag)
+    
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = "MOLA VER (KILITLE)"; $btn.Dock = "Bottom"; $btn.Height = 35; $btn.BackColor = "Orange"; $btn.FlatStyle = "Flat"
+    
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 1000
+    
+    $btn.Add_Click({ 
+        $timer.Stop(); $timer.Dispose()
+        $nowAtClose = Get-Date
+        $diff = $script:targetTime - $nowAtClose
+        $finalKalan = [Math]::Max(0, [int]$diff.TotalSeconds)
+        
+        Write-Log "MOLA" "Kilitlendi | Hedef: $($script:targetTime.ToString('HH:mm:ss')) | Kapatma: $($nowAtClose.ToString('HH:mm:ss')) | Kalan Kaydedildi: $finalKalan sn"
+        
+        $nowCfg = Get-Config
+        if($nowCfg.AktifCocuk -match "Mirza") { $nowCfg.MirzaKalanSaniye = $finalKalan } else { $nowCfg.YagizKalanSaniye = $finalKalan }
+        $nowCfg.SistemKilitli = $true; Save-Config $nowCfg
+        $p.Close()
+    })
+
+    $timer.Add_Tick({
+        if ($p.Visible -eq $false) { $timer.Stop(); return }
+        $cfg = Get-Config
+        if ($cfg.AdminModu) { $info.Text = "ADMIN MODU`nSURE DURDURULDU"; return }
+
+        $diff = $script:targetTime - (Get-Date)
+        $totalSeconds = [int]$diff.TotalSeconds
+
+        # Her 5 dakikada bir detaylı takip logu yaz
+        if ($totalSeconds % 300 -eq 0 -and $totalSeconds -gt 0) {
+            Write-Log "TAKIP" "$($cfg.AktifCocuk) | Kalan: $totalSeconds sn | Hedef: $($script:targetTime.ToString('HH:mm:ss'))"
+        }
+
+        if ((Get-Date -Format "HH:mm") -ge $cfg.LastHour) {
+            Write-Log "ENGEL" "Yatis saati geldi, oturum kapatiliyor."
+            $timer.Stop(); $cfg.SistemKilitli = $true; Save-Config $cfg; $p.Close()
+        }
+
+        if ($totalSeconds -le 0) {
+            Write-Log "BITIS" "$($cfg.AktifCocuk) suresi doldu. Sifirlaniyor ve sira degisiyor."
+            if($cfg.AktifCocuk -match "Mirza") { $cfg.MirzaKalanSaniye = 3600; $cfg.AktifCocuk = "Yağız" } 
+            else { $cfg.YagizKalanSaniye = 3600; $cfg.AktifCocuk = "Mirza" }
+            $cfg.SistemKilitli = $true; Save-Config $cfg
+            $timer.Stop(); $timer.Dispose(); $p.Close()
+        }
+
+        $ts = [TimeSpan]::FromSeconds([Math]::Max(0, $totalSeconds))
+        $info.Text = $cfg.AktifCocuk.ToUpper() + "`nKalan: " + $ts.Minutes + " dk " + $ts.Seconds + " sn"
+    })
+    $p.Controls.AddRange(@($info, $btn)); $timer.Start(); $p.ShowDialog()
+}
+
+# --- 🚀 RESTART KORUMASI VE SIFIRLAMA ---
+Write-Log "SISTEM" "Bilgisayar baslatildi. Tum ayarlar sifirlaniyor."
+$baslangic = Get-Config
+if ($baslangic) {
+    $baslangic.SistemKilitli = $true
+    $baslangic.AdminModu = $false
+    $baslangic.MirzaKalanSaniye = 3600
+    $baslangic.YagizKalanSaniye = 3600
+    Save-Config $baslangic
+    Write-Log "SISTEM" "Sifirlama Tamam: Mirza: 3600sn, Yagiz: 3600sn, Kilit: Aktif."
+}
+
+# --- ANA DÖNGÜ ---
+while($true) {
+    $c = Get-Config
+    if ($c) {
+        if ($c.SistemKilitli) { Show-LockScreen } else { Show-TimerPanel }
+    }
+    Start-Sleep -Seconds 1
+}
